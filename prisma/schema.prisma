@@ -1,0 +1,390 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// USUARIO / DETECTIVE
+// ---------------------------------------------------------------------------
+
+model User {
+  id             String   @id @default(cuid())
+  username       String   @unique
+  level          Int      @default(1)
+  xp             Int      @default(0)
+  coins          Int      @default(0)
+  casesSolved    Int      @default(0)
+  casesFailed    Int      @default(0)
+  bestStreak     Int      @default(0)
+  currentStreak  Int      @default(0)
+  bestTimeSecs   Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  investigations   Investigation[]
+  achievements     UserAchievement[]
+  caseProgress     UserCaseUnlock[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// CASO
+// ---------------------------------------------------------------------------
+
+enum Difficulty {
+  FACIL
+  MEDIO
+  DIFICIL
+  EXPERTO
+}
+
+model Case {
+  id              String     @id @default(cuid())
+  code            String     @unique // "CASO-001"
+  slug            String     @unique // "el-ultimo-tren"
+  title           String
+  intro           String     @db.Text
+  victimName      String
+  victimAge       Int
+  victimJob       String
+  place           String
+  timeOfCrime     String
+  difficulty      Difficulty @default(FACIL)
+  order           Int        @default(0)
+  requiredLevel   Int        @default(1)
+  guiltySuspectId String? // set only server-side reference, never sent to client pre-resolution
+  motive          String     @db.Text // true motive (server-side, revealed at resolution)
+  method          String     @db.Text // true method, revealed at resolution
+  resolutionText  String     @db.Text
+  xpReward        Int        @default(300)
+  coinReward      Int        @default(150)
+  isActive        Boolean    @default(true)
+  scene           String? // key of the procedural scene art ("museo", "tren", "hotel"...)
+  heroImageUrl    String? // futuro: foto/ilustración real de portada (opcional)
+  createdAt       DateTime   @default(now())
+
+  suspects           Suspect[]
+  clues              Clue[]
+  locations          CaseLocation[]
+  investigations     Investigation[]
+  unlockedFor        UserCaseUnlock[]
+  deductions         Deduction[]
+  timelineEvents     TimelineEvent[]
+  accusationChoices  AccusationChoice[]
+
+  @@map("cases")
+}
+
+model UserCaseUnlock {
+  id        String   @id @default(cuid())
+  userId    String
+  caseId    String
+  unlockedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, caseId])
+  @@map("user_case_unlocks")
+}
+
+// ---------------------------------------------------------------------------
+// SOSPECHOSOS
+// ---------------------------------------------------------------------------
+
+model Suspect {
+  id              String  @id @default(cuid())
+  caseId          String
+  name            String
+  age             Int
+  job             String
+  relationship    String
+  bio             String  @db.Text
+  avatarColor     String  @default("#8a8a8a")
+  imageUrl        String? // futuro: retrato real (opcional); si falta, se usa retrato procedural
+  alibi           String? @db.Text // coartada declarada (visible en el expediente del sospechoso)
+  openingStatement String? @db.Text // primera frase del sospechoso al abrir el interrogatorio
+  isGuilty        Boolean @default(false) // never exposed to client before case resolves
+  order           Int     @default(0)
+
+  case      Case       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  dialogues Dialogue[]
+  clues     Clue[]     @relation("ClueImplicatesSuspect")
+
+  @@map("suspects")
+}
+
+// ---------------------------------------------------------------------------
+// UBICACIONES
+// ---------------------------------------------------------------------------
+
+model CaseLocation {
+  id          String @id @default(cuid())
+  caseId      String
+  key         String // "vagon", "anden", "estacion", "oficina-guardia"
+  name        String
+  description String @db.Text
+  imageUrl    String? // futuro: foto real de la escena (opcional)
+  order       Int    @default(0)
+
+  case    Case                @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  actions CaseLocationAction[]
+
+  @@unique([caseId, key])
+  @@map("case_locations")
+}
+
+model CaseLocationAction {
+  id         String  @id @default(cuid())
+  locationId String
+  label      String // "Buscar debajo del asiento"
+  resultText String  @db.Text
+  clueId     String? @unique // may or may not reveal a clue
+  order      Int     @default(0)
+
+  location CaseLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  clue     Clue?        @relation(fields: [clueId], references: [id])
+
+  @@map("case_location_actions")
+}
+
+// ---------------------------------------------------------------------------
+// PISTAS / EVIDENCIAS
+// ---------------------------------------------------------------------------
+
+enum ClueType {
+  FISICA
+  TESTIMONIO
+  DOCUMENTO
+  DIGITAL
+}
+
+enum ClueImportance {
+  BAJA
+  MEDIA
+  ALTA
+  CLAVE
+}
+
+model Clue {
+  id          String         @id @default(cuid())
+  caseId      String
+  title       String
+  description String         @db.Text
+  icon        String         @default("Search")
+  imageUrl    String?        // futuro: foto real de la evidencia (opcional)
+  type        ClueType       @default(FISICA)
+  importance  ClueImportance @default(MEDIA) // server-side only: jamás se muestra al jugador
+  isRedHerring Boolean       @default(false)
+  locationKey String? // where it's found, for display
+
+  case                Case                 @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  implicatesSuspect   Suspect?             @relation("ClueImplicatesSuspect", fields: [implicatesSuspectId], references: [id])
+  implicatesSuspectId String? // server-side only: NUNCA se serializa al cliente antes de resolver
+  locationActions     CaseLocationAction[]
+  investigationClues  InvestigationClue[]
+  unlockedByDialogueOptions DialogueOption[] @relation("OptionUnlocksClue")
+  requiredForOptions  DialogueOption[]       @relation("OptionRequiresClue")
+  revealsTimelineEvents TimelineEvent[]      @relation("TimelineRevealedByClue")
+
+  @@map("clues")
+}
+
+// ---------------------------------------------------------------------------
+// INTERROGATORIOS (dialogos predefinidos)
+// ---------------------------------------------------------------------------
+
+model Dialogue {
+  id        String @id @default(cuid())
+  suspectId String
+  question  String @db.Text
+  order     Int    @default(0)
+
+  suspect Suspect          @relation(fields: [suspectId], references: [id], onDelete: Cascade)
+  options DialogueOption[]
+
+  @@map("dialogues")
+}
+
+enum DialogueOptionKind {
+  PREGUNTAR
+  MOSTRAR_EVIDENCIA
+  ACUSAR_CONTRADICCION
+  CONTINUAR
+}
+
+model DialogueOption {
+  id               String             @id @default(cuid())
+  dialogueId       String
+  kind             DialogueOptionKind @default(PREGUNTAR)
+  label            String // la pregunta que hace el investigador (burbuja derecha)
+  responseText     String             @db.Text // la respuesta del sospechoso (burbuja izquierda)
+  requiresClueId   String?
+  requiresOptionId String? // solo aparece después de haber preguntado otra cosa (cadena de preguntas)
+  unlocksClueId    String?
+  order            Int                @default(0)
+
+  dialogue      Dialogue @relation(fields: [dialogueId], references: [id], onDelete: Cascade)
+  requiresClue  Clue?    @relation("OptionRequiresClue", fields: [requiresClueId], references: [id])
+  priorOption   DialogueOption? @relation("OptionChainedAfter", fields: [requiresOptionId], references: [id])
+  chainedOptions DialogueOption[] @relation("OptionChainedAfter")
+  unlocksClue   Clue?    @relation("OptionUnlocksClue", fields: [unlocksClueId], references: [id])
+  revealsTimelineEvents TimelineEvent[] @relation("TimelineRevealedByOption")
+
+  @@map("dialogue_options")
+}
+
+// ---------------------------------------------------------------------------
+// PARTIDA / INVESTIGACION EN CURSO
+// ---------------------------------------------------------------------------
+
+enum InvestigationStatus {
+  EN_CURSO
+  RESUELTO
+  FALLIDO
+}
+
+model Investigation {
+  id            String               @id @default(cuid())
+  userId        String
+  caseId        String
+  status        InvestigationStatus  @default(EN_CURSO)
+  startedAt     DateTime             @default(now())
+  finishedAt    DateTime?
+  accusedSuspectId String?
+  accusedMotiveLabel String? // etiqueta del motivo elegido al acusar
+  accusedMethodLabel String? // etiqueta del método elegido al acusar
+  answeredDialogueOptionIds String[] @default([]) // opciones de interrogatorio ya preguntadas
+  timeSecs      Int?
+  xpEarned      Int?
+  coinsEarned   Int?
+
+  user  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case  Case                 @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  clues InvestigationClue[]
+  deductions InvestigationDeduction[]
+
+  @@map("investigations")
+}
+
+model InvestigationClue {
+  id              String   @id @default(cuid())
+  investigationId String
+  clueId          String
+  discoveredAt    DateTime @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  clue          Clue          @relation(fields: [clueId], references: [id], onDelete: Cascade)
+
+  @@unique([investigationId, clueId])
+  @@map("investigation_clues")
+}
+
+// ---------------------------------------------------------------------------
+// LOGROS
+// ---------------------------------------------------------------------------
+
+model Achievement {
+  id          String @id @default(cuid())
+  key         String @unique // "primer_caso"
+  title       String
+  description String
+  icon        String @default("Award")
+
+  users UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+// ---------------------------------------------------------------------------
+// LÍNEA TEMPORAL
+// ---------------------------------------------------------------------------
+
+model TimelineEvent {
+  id              String   @id @default(cuid())
+  caseId          String
+  time            String // "22:10"
+  text            String   @db.Text
+  order           Int      @default(0)
+  isPublic        Boolean  @default(false) // visible desde el inicio del caso
+  revealedByClueId   String?
+  revealedByOptionId String?
+
+  case   Case          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  clue   Clue?         @relation("TimelineRevealedByClue", fields: [revealedByClueId], references: [id])
+  option DialogueOption? @relation("TimelineRevealedByOption", fields: [revealedByOptionId], references: [id])
+
+  @@map("timeline_events")
+}
+
+// ---------------------------------------------------------------------------
+// DEDUCCIONES (conectar varias piezas para llegar a una conclusión)
+// ---------------------------------------------------------------------------
+
+model Deduction {
+  id          String   @id @default(cuid())
+  caseId      String
+  title       String
+  text        String   @db.Text
+  requiredClueIds   String[] @default([])
+  requiredOptionIds String[] @default([])
+  order       Int      @default(0)
+
+  case           Case                   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  investigations InvestigationDeduction[]
+
+  @@map("deductions")
+}
+
+model InvestigationDeduction {
+  id              String   @id @default(cuid())
+  investigationId String
+  deductionId     String
+  unlockedAt      DateTime @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  deduction     Deduction     @relation(fields: [deductionId], references: [id], onDelete: Cascade)
+
+  @@unique([investigationId, deductionId])
+  @@map("investigation_deductions")
+}
+
+// ---------------------------------------------------------------------------
+// ACUSACIÓN: opciones de motivo y método
+// ---------------------------------------------------------------------------
+
+enum AccusationChoiceKind {
+  MOTIVO
+  METODO
+}
+
+model AccusationChoice {
+  id        String               @id @default(cuid())
+  caseId    String
+  kind      AccusationChoiceKind
+  label     String
+  isCorrect Boolean              @default(false) // server-side only: nunca se manda al cliente
+  order     Int                  @default(0)
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("accusation_choices")
+}
