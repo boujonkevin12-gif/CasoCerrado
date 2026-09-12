@@ -31,15 +31,28 @@ export default async function LandingPage() {
 
   return (
     <main className="flex flex-1 flex-col">
-      <section className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6 py-24 text-center">
+      <section className="relative flex min-h-svh flex-1 flex-col items-center justify-center overflow-hidden px-6 py-24 text-center">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.05]"
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage: "url('/hero-casefile.png')",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+          }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
           style={{
             backgroundImage:
-              "linear-gradient(var(--color-hairline-strong) 1px, transparent 1px), linear-gradient(90deg, var(--color-hairline-strong) 1px, transparent 1px)",
-            backgroundSize: "42px 42px",
+              "radial-gradient(120% 95% at 50% 42%, rgba(9,9,10,0.7) 0%, rgba(9,9,10,0.4) 48%, rgba(9,9,10,0.82) 100%)",
           }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{ boxShadow: "inset 0 0 220px 80px rgba(9,9,10,0.85)" }}
         />
 
         <div className="relative z-10 flex flex-col items-center animate-fade-up">
