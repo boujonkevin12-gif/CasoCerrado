@@ -21,10 +21,12 @@ export async function createProfile(
     return { error: "Usá solo letras, números, espacios y guiones bajos." };
   }
 
-  let user = await prisma.user.findUnique({ where: { username } });
-  if (!user) {
-    user = await prisma.user.create({ data: { username } });
-  }
+  // La identidad del detective es de DISPOSITIVO (cookie httpOnly), no del nombre.
+  // Cada navegador crea SU PROPIO expediente aunque repita un nombre ya usado.
+  const user = await prisma.user.create({
+    data: { username },
+    select: { id: true },
+  });
 
   await ensureUnlockedCases(user.id);
   await setSessionUser(user.id);
